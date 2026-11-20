@@ -2,9 +2,13 @@
 
 形态选型（与需求一致，择一）：
   - 独立 bond 边表 ``drop_pickup_bonds``；
-  - 关账失败闭：同事务写边 + 关占用 + 改格口；
+  - 关账失败闭：同事务写边 + 落事件链投影 + 关占用 + 改格口；
   - 缺 drop 侧：拒关账并写 ``quarantine``；
   - 存量已释放无边：启动补边，补不齐写搁置。
+
+关账绑定标成功必须同成败写入占用事件链投影（occupancy_event_chain）：
+绑定边与链投影在同一 SAVEPOINT 内重算落库，缺任一整体回滚并搁置，
+绝不留「绑定已成、事件链投影未接」的半账。
 
 库层另有两条触发器兜底：
   ``trg_bond_legs_valid``            绑定边两端事件必须存在、类型正确、运单一致；
@@ -19,6 +23,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from app.modules import occupancy_event_chain as chain_proj
+
 STATUS = "implemented"
 
 CLOSE_SOURCE = "close"
@@ -26,6 +32,7 @@ BACKFILL_SOURCE = "backfill"
 
 REASON_NO_OPEN = "格口无开放占用，拒绝关账"
 REASON_MISSING_DROP = "pickup 无可绑定的 drop 侧，拒绝关账"
+REASON_CHAIN_PROJECTION = "事件链投影失败，拒绝关账"
 REASON_BACKFILL = "存量释放无法补边"
 
 EVENT_FIELDS = ("id", "cabinet_id", "cell_id", "event_type", "event_ts", "tracking_no")
@@ -205,11 +212,16 @@ def insert_bond(
 
 
 def close_with_bond(conn, occupancy, pickup_event, now: str | None = None) -> dict:
-    """写边 → 关占用 → 改格口。调用方负责事务边界（外层 atomic / commit）。"""
+    """写边 → 重算落事件链 → 关占用 → 改格口。调用方负责事务边界（外层 atomic / commit）。
+
+    绑定边与事件链投影同成败：链重算失败（缺腿/时序分叉）抛 ChainError，
+    与任一步库错一样由外层 SAVEPOINT 整体回滚，不留半账。
+    """
     now = now or _utcnow()
     pickup = validate_pickup(conn, pickup_event)
     drop = resolve_drop_leg(conn, occupancy, pickup)
     bond_id = insert_bond(conn, occupancy["id"], drop, pickup, now, CLOSE_SOURCE)
+    chain = chain_proj.materialize_chain(conn, occupancy, bond_id, drop, pickup, now)
 
     cur = conn.execute(
         "UPDATE occupancies SET closed_at=?, status='released', last_event_id=? "
@@ -228,6 +240,7 @@ def close_with_bond(conn, occupancy, pickup_event, now: str | None = None) -> di
         "pickup_event_id": pickup["id"],
         "tracking_no": pickup["tracking_no"],
         "cell_id": occupancy["cell_id"],
+        "chain": chain,
     }
 
 
@@ -253,6 +266,10 @@ def try_close_pickup(conn, pickup_event, now: str | None = None) -> dict:
             REASON_MISSING_DROP if exc.code == "missing_drop_leg" else exc.message,
             now,
             detail=exc.message if exc.code == "missing_drop_leg" else None,
+        )
+    except chain_proj.ChainError as exc:
+        return _reject(
+            conn, pickup_event, exc.code, REASON_CHAIN_PROJECTION, now, detail=exc.message
         )
     except sqlite3.IntegrityError as exc:
         return _reject(conn, pickup_event, "bond_integrity", str(exc), now)

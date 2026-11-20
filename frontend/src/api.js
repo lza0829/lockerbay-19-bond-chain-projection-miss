@@ -22,5 +22,7 @@ export const api = {
   setOverdue: (overdue_hours) =>
     req('/api/settings/overdue-hours', { method: 'PUT', body: JSON.stringify({ overdue_hours }) }),
   ingest: () => req('/api/ingest/run', { method: 'POST', body: '{}' }),
-  occupancyChain: (id) => req(`/api/occupancy-chain/${id}`),
+  occupancyChain: (id) => req(`/api/occupancy-chain/${encodeURIComponent(id)}`),
+  verifyChain: (id) => req(`/api/occupancy-chain/${encodeURIComponent(id)}/verify`),
+  chainProofs: () => req('/api/chain-proofs'),
 }

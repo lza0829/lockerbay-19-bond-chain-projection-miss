@@ -15,6 +15,23 @@ onMounted(load)
     <p class="sub">投柜 / 取件事件进入主通道；基座按顺序物化占用。</p>
     <p><button @click="run">跑一批夹具</button></p>
     <pre v-if="report" class="panel">{{ report }}</pre>
+    <div v-if="report?.close_receipts?.length" class="panel" style="margin-top:1rem">
+      <h2 style="margin:0 0 .5rem; font-size:1rem">关账回执（绑定边 + 事件链投影同成败落库）</h2>
+      <table>
+        <thead><tr><th>占用</th><th>绑定边</th><th>事件链</th><th>链时序</th></tr></thead>
+        <tbody>
+          <tr v-for="r in report.close_receipts" :key="r.occupancy_id">
+            <td><code>{{ r.occupancy_id }}</code></td>
+            <td><code>{{ r.bond_id }}</code></td>
+            <td>
+              <code>{{ r.chain_event_ids.join(' → ') }}</code>
+              <div class="sub">{{ r.chain_event_count }} 事件</div>
+            </td>
+            <td class="sub">{{ r.chain_drop_ts }} → {{ r.chain_pickup_ts }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <div v-if="report?.rejected_closes?.length" class="panel" style="margin-top:1rem; border-color:var(--over)">
       <h2 style="margin:0 0 .5rem; font-size:1rem">拒关账（缺 drop 侧已搁置）</h2>
       <table>

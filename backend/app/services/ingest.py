@@ -17,6 +17,7 @@ def run_batch():
     conn = connect()
     accepted = 0
     bonded = 0
+    close_receipts = []
     rejected_closes = []
     try:
         # 整批一个事务；单条 pickups 关账用 savepoint 隔离，失败只回滚该条并搁置。
@@ -56,6 +57,20 @@ def run_batch():
                 outcome = bond_proof.try_close_pickup(conn, ev, now)
                 if outcome["status"] == "closed":
                     bonded += 1
+                    chain = outcome["chain"]
+                    # 关账回执不只写 bond_ok：绑定边与事件链投影同成败落库，回执双载。
+                    close_receipts.append(
+                        {
+                            "occupancy_id": outcome["occupancy_id"],
+                            "bond_id": outcome["bond_id"],
+                            "drop_event_id": outcome["drop_event_id"],
+                            "pickup_event_id": outcome["pickup_event_id"],
+                            "chain_event_ids": chain["event_ids"],
+                            "chain_drop_ts": chain["drop_event_ts"],
+                            "chain_pickup_ts": chain["pickup_event_ts"],
+                            "chain_event_count": chain["event_count"],
+                        }
+                    )
                 else:
                     rejected_closes.append(
                         {
@@ -67,6 +82,8 @@ def run_batch():
             "accepted": accepted,
             "total": len(events),
             "bonded": bonded,
+            "chained": len(close_receipts),
+            "close_receipts": close_receipts,
             "rejected_closes": rejected_closes,
         }
         conn.execute(

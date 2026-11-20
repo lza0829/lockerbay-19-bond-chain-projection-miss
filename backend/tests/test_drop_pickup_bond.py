@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app import db as db_mod
 from app import seed as seed_mod
 from app.modules import drop_pickup_bond_proof as bond_proof
+from app.modules import occupancy_event_chain as chain_proj
 
 
 def _connect(tmp_path, monkeypatch):
@@ -23,6 +24,7 @@ def _connect(tmp_path, monkeypatch):
     conn = db_mod.connect()
     conn.executescript(seed_mod.SCHEMA)
     conn.executescript(bond_proof.SCHEMA_SQL)
+    conn.executescript(chain_proj.SCHEMA_SQL)
     return conn
 
 
@@ -207,6 +209,7 @@ def test_failed_close_leaves_no_partial_bond(conn):
             bond_proof.close_with_bond(flaky, occupancy, _pickup())
 
     assert conn.execute("SELECT COUNT(*) AS c FROM drop_pickup_bonds").fetchone()["c"] == 0
+    assert conn.execute("SELECT COUNT(*) AS c FROM occupancy_event_chain").fetchone()["c"] == 0
     assert conn.execute("SELECT status FROM occupancies WHERE id='OCC-1'").fetchone()[
         "status"
     ] == "occupied"
@@ -219,14 +222,16 @@ def test_failed_close_leaves_no_partial_bond(conn):
 
 
 def test_backfill_repairs_legacy_released(conn):
-    # 模拟旧逻辑：直接改 status 的存量（触发器先关掉以造出脏数据）
+    # 模拟旧逻辑：直接改 status 的存量（边/链两道释放闸先关掉以造出脏数据）
     conn.execute("DROP TRIGGER trg_released_requires_bond")
+    conn.execute("DROP TRIGGER trg_released_requires_chain")
     conn.execute(
         "UPDATE occupancies SET status='released', closed_at='2026-11-18T12:00:00Z'"
         " WHERE id='OCC-1'"
     )
     _add_event(conn, "P1", "pickup", "CAB-A-01", "TN1", "2026-11-18T12:00:00Z")
     conn.executescript(bond_proof.SCHEMA_SQL)  # 恢复触发器
+    conn.executescript(chain_proj.SCHEMA_SQL)
 
     report = bond_proof.backfill_bonds(conn)
     assert report["backfilled"] == 1
@@ -235,10 +240,20 @@ def test_backfill_repairs_legacy_released(conn):
     assert bond["drop_event_id"] == "D1"
     assert bond["pickup_event_id"] == "P1"
 
+    # 补边后事件链投影也要能补齐
+    chain_report = chain_proj.backfill_chains(conn)
+    assert chain_report["backfilled"] == 1
+    chain = conn.execute("SELECT * FROM occupancy_event_chain").fetchone()
+    assert chain["drop_event_id"] == "D1"
+    assert chain["pickup_event_id"] == "P1"
+
     # 幂等：再跑一次不重复补
     again = bond_proof.backfill_bonds(conn)
     assert again["backfilled"] == 0
     assert conn.execute("SELECT COUNT(*) AS c FROM drop_pickup_bonds").fetchone()["c"] == 1
+    again_chain = chain_proj.backfill_chains(conn)
+    assert again_chain["backfilled"] == 0
+    assert conn.execute("SELECT COUNT(*) AS c FROM occupancy_event_chain").fetchone()["c"] == 1
 
 
 def test_backfill_quarantines_when_unrepairable(tmp_path, monkeypatch):

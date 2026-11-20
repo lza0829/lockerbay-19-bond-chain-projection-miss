@@ -2,6 +2,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from app.db import connect
 from app.modules import drop_pickup_bond_proof as bond_proof
+from app.modules import occupancy_event_chain as chain_svc
 from app.seed import overdue_hours
 from app.services import bay as bay_svc
 from app.services import ingest as ingest_svc
@@ -147,14 +148,41 @@ def put_overdue(body: dict = Body(...)):
     finally:
         conn.close()
 
-# --- plant routes ---
-from app.modules import occupancy_event_chain as chain_svc
+# --- 事件链投影：格阵下钻 + 核证对账 ---
+
 
 @router.get("/occupancy-chain/{occupancy_id}")
 def occupancy_chain(occupancy_id: str):
+    """格阵下钻：已释放占用给持久事件链投影，开放占用给实时重放。"""
     conn = connect()
     try:
-        return chain_svc.chain_for(conn, occupancy_id)
+        chain = chain_svc.chain_for(conn, occupancy_id)
+        if chain is None:
+            raise HTTPException(404, f"占用 {occupancy_id} 不存在")
+        return chain
+    finally:
+        conn.close()
+
+
+@router.get("/occupancy-chain/{occupancy_id}/verify")
+def occupancy_chain_verify(occupancy_id: str):
+    """事件链核证：重放事件库，与持久投影、绑定边三方互证。"""
+    conn = connect()
+    try:
+        verdict = chain_svc.verify_chain(conn, occupancy_id)
+        if verdict is None:
+            raise HTTPException(404, f"占用 {occupancy_id} 不存在")
+        return verdict
+    finally:
+        conn.close()
+
+
+@router.get("/chain-proofs")
+def chain_proofs():
+    """事件链对账：每个占用一行，投影/绑定边/事件库重放互证结果。"""
+    conn = connect()
+    try:
+        return chain_svc.chain_proofs(conn)
     finally:
         conn.close()
 

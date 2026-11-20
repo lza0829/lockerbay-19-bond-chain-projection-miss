@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from app.db import FIXTURES_DIR, connect
 from app.modules import drop_pickup_bond_proof as bond_proof
+from app.modules import occupancy_event_chain as chain_proj
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -81,11 +82,13 @@ def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
     conn.executescript(bond_proof.SCHEMA_SQL)
+    conn.executescript(chain_proj.SCHEMA_SQL)
     if not conn.execute("SELECT 1 FROM settings WHERE key='overdue_hours'").fetchone():
         conn.execute("INSERT INTO settings(key, value) VALUES ('overdue_hours', '48')")
     if conn.execute("SELECT COUNT(*) AS c FROM cabinets").fetchone()["c"] == 0:
         _seed(conn)
     bond_proof.backfill_bonds(conn)
+    chain_proj.backfill_chains(conn)
     conn.commit()
     conn.close()
 
