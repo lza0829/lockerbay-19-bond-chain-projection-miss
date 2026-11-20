@@ -1,0 +1,7 @@
+{
+  "events": [
+    {"id": "E5", "cabinet_id": "CAB-A", "cell_id": "CAB-A-03", "event_type": "drop", "event_ts": "2026-11-19T02:00:00Z", "tracking_no": "TN1003", "payload": {}},
+    {"id": "E6", "cabinet_id": "CAB-A", "cell_id": "CAB-A-03", "event_type": "pickup", "event_ts": "2026-11-19T06:15:00Z", "tracking_no": "TN1003", "payload": {}},
+    {"id": "E7", "cabinet_id": "CAB-B", "cell_id": "CAB-B-01", "event_type": "pickup", "event_ts": "2026-11-19T07:40:00Z", "tracking_no": "TN2002", "payload": {"note": "格口有开放占用但该运单无 drop 侧，应拒关账并搁置"}}
+  ]
+}

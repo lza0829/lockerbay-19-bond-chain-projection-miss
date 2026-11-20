@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+backend/data/
+
+# Node / 前端构建产物
+node_modules/
+dist/
+
+# 本地
+*.db
+.DS_Store
